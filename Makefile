@@ -41,4 +41,5 @@ bin:	self
 	@GOPATH=$(GOPATH) go build -o bin/wof-pgis-connect cmd/wof-pgis-connect.go
 	@GOPATH=$(GOPATH) go build -o bin/wof-pgis-dump cmd/wof-pgis-dump.go
 	@GOPATH=$(GOPATH) go build -o bin/wof-pgis-index cmd/wof-pgis-index.go
+	@GOPATH=$(GOPATH) go build -o bin/wof-pgis-intersects cmd/wof-pgis-intersects.go
 	@GOPATH=$(GOPATH) go build -o bin/wof-pgis-prune cmd/wof-pgis-prune.go

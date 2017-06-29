@@ -6,8 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
 func main() {
@@ -21,7 +19,7 @@ func main() {
 
 	verbose := flag.Bool("verbose", false, "Be chatty about what's happening. This is automatically enabled if the -debug flag is set.")
 	debug := flag.Bool("debug", false, "Go through all the motions but don't actually index anything.")
-	strict := flag.Bool("strict", false, "Throw fatal errors rather than warning when certain conditions fails.")
+	// strict := flag.Bool("strict", false, "Throw fatal errors rather than warning when certain conditions fails.")
 
 	flag.Parse()
 
@@ -38,4 +36,32 @@ func main() {
 	client.Verbose = *verbose
 	client.Debug = *debug
 
+	// please allow for STDIN too...
+
+	for _, path := range flag.Args() {
+
+		fh, err := os.Open(path)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		feature, err := ioutil.ReadAll(fh)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		rows, err := client.IntersectsFeature(feature)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, row := range rows {
+			log.Println(row)
+		}
+	}
+
+	os.Exit(0)
 }

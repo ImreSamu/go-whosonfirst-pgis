@@ -154,24 +154,27 @@ func (client *PgisClient) Connection() (*sql.DB, error) {
 	return client.db, nil
 }
 
-func (client *PgisClient) IntersectsFeature(f []byte) error {
+func (client *PgisClient) IntersectsFeature(f []byte) ([]*PgisRow, error) {
 
-     /*
-     
-     DEBUG:root:SELECT id, parent_id, placetype_id, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s LIMIT 5000 OFFSET 0
-INFO:root:find intersecting descendants of placetype county (for 85671863 (Francisco Morazán))
-...
-DEBUG:root:SELECT COUNT(id) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s
+	/*
 
-     */
+	     DEBUG:root:SELECT id, parent_id, placetype_id, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s LIMIT 5000 OFFSET 0
+	INFO:root:find intersecting descendants of placetype county (for 85671863 (Francisco Morazán))
+	...
+	DEBUG:root:SELECT COUNT(id) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s
 
-     geom := gjson.GetBytes(f, "geometry")
+	*/
 
-     if ! geom.Exists(){
-     	return errors.New("Feature is missing a geometry")
-     }
+	rows := make([]*PgisRow, 0)
 
-     return nil
+	geom := gjson.GetBytes(f, "geometry")
+
+	if !geom.Exists() {
+		err := errors.New("Feature is missing a geometry")
+		return nil, err
+	}
+
+	return rows, nil
 }
 
 func (client *PgisClient) GetById(id int64) (*PgisRow, error) {
