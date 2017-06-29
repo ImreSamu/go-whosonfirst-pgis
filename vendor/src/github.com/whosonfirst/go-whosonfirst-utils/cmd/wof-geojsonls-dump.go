@@ -1,9 +1,9 @@
 package main
 
 import (
+       "bufio"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"github.com/tidwall/gjson"
 	"github.com/whosonfirst/go-whosonfirst-crawl"
 	"github.com/whosonfirst/go-whosonfirst-uri"
@@ -11,18 +11,40 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync"
+	"time"
 )
 
 func main() {
 
+	outfile := flag.String("out", "", "Where to write records (default is STDOUT)")
 	exclude_deprecated := flag.Bool("exclude-deprecated", false, "Exclude records that have been deprecated.")
 	exclude_superseded := flag.Bool("exclude-superseded", false, "Exclude records that have been superseded.")
+	timings := flag.Bool("timings", false, "Print timings")
 
 	procs := flag.Int("processes", runtime.NumCPU()*2, "The number of concurrent processes to use")
 
 	flag.Parse()
 
 	runtime.GOMAXPROCS(*procs)
+
+	var wr *bufio.Writer
+
+	if *outfile != "" {
+
+	   fh, err := os.Create(*outfile)
+
+	   if err != nil {
+	   	log.Fatal(err)
+	   }
+
+	   wr = bufio.NewWriter(fh)
+
+	} else {
+		wr = bufio.NewWriter(os.Stdout)
+	}
+
+	mu := new(sync.Mutex)
 
 	for _, root := range flag.Args() {
 
@@ -116,11 +138,30 @@ func main() {
 				return err
 			}
 
-			fmt.Printf("%s\n", body)
+			mu.Lock()
+			defer mu.Unlock()
+
+			_, err = wr.Write(body)
+
+			if err != nil {
+				return err
+			}
+
+			wr.Write([]byte("\n"))
+			wr.Flush()
+
 			return nil
 		}
 
+		t1 := time.Now()
+		
 		c := crawl.NewCrawler(root)
 		c.Crawl(callback)
+
+		t2 := time.Since(t1)
+
+		if *timings {
+			log.Printf("time to process %s: %v\n", root, t2)
+		}
 	}
 }

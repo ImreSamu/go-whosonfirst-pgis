@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	_ "github.com/lib/pq"
+	"github.com/tidwall/gjson"
 	"github.com/whosonfirst/go-whosonfirst-crawl"
 	"github.com/whosonfirst/go-whosonfirst-csv"
 	"github.com/whosonfirst/go-whosonfirst-geojson"
@@ -151,6 +152,26 @@ func (client *PgisClient) Connection() (*sql.DB, error) {
 	<-client.conns
 
 	return client.db, nil
+}
+
+func (client *PgisClient) IntersectsFeature(f []byte) error {
+
+     /*
+     
+     DEBUG:root:SELECT id, parent_id, placetype_id, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s LIMIT 5000 OFFSET 0
+INFO:root:find intersecting descendants of placetype county (for 85671863 (Francisco Morazán))
+...
+DEBUG:root:SELECT COUNT(id) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s
+
+     */
+
+     geom := gjson.GetBytes(f, "geometry")
+
+     if ! geom.Exists(){
+     	return errors.New("Feature is missing a geometry")
+     }
+
+     return nil
 }
 
 func (client *PgisClient) GetById(id int64) (*PgisRow, error) {
