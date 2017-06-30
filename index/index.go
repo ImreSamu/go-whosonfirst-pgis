@@ -66,6 +66,12 @@ type PgisRow struct {
 	Centroid     string
 }
 
+type PgisIntersectsOptions struct {
+	PlacetypeId  int64
+	IsSuperseded bool
+	IsDeprecated bool
+}
+
 func NewPgisRow(id int64, pid int64, ptid int64, superseded int, deprecated int, meta string, geom string, centroid string) (*PgisRow, error) {
 
 	row := PgisRow{
@@ -154,16 +160,22 @@ func (client *PgisClient) Connection() (*sql.DB, error) {
 	return client.db, nil
 }
 
-func (client *PgisClient) IntersectsFeature(f []byte) ([]*PgisRow, error) {
+func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOptions) ([]*PgisRow, error) {
 
 	/*
 
-	     DEBUG:root:SELECT id, parent_id, placetype_id, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s LIMIT 5000 OFFSET 0
-	INFO:root:find intersecting descendants of placetype county (for 85671863 (Francisco Morazán))
-	...
-	DEBUG:root:SELECT COUNT(id) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s
+		     DEBUG:root:SELECT id, parent_id, placetype_id, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s LIMIT 5000 OFFSET 0
+		INFO:root:find intersecting descendants of placetype county (for 85671863 (Francisco Morazán))
+		...
+
 
 	*/
+
+	db, err := client.dbconn()
+
+	if err != nil {
+		return nil, err
+	}
 
 	rows := make([]*PgisRow, 0)
 
@@ -172,6 +184,53 @@ func (client *PgisClient) IntersectsFeature(f []byte) ([]*PgisRow, error) {
 	if !geom.Exists() {
 		err := errors.New("Feature is missing a geometry")
 		return nil, err
+	}
+
+	// first get the counts - we might actually just get rid of this
+
+	sql_geom := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
+	sql_centroid := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
+
+	sql_counts := []string{
+		sql_geom,
+		sql_centroid,
+	}
+
+	count_queries := len(sql_counts)
+	count_total := 0
+
+	ch := make(chan int)
+	done := make(chan bool)
+
+	for _, sql := range sql_counts {
+
+		go func() {
+
+			defer func() {
+				done <- true
+			}()
+
+			row := db.QueryRow(sql)
+
+			var count_rows int
+			err = row.Scan(&count_rows)
+
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			ch <- count_rows
+		}()
+	}
+
+	for n := count_queries; n > 0; {
+		select {
+		case c := <-ch:
+			count_total += c
+		case <-done:
+			n--
+		}
 	}
 
 	return rows, nil

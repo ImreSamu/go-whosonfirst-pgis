@@ -52,7 +52,13 @@ func main() {
 			log.Fatal(err)
 		}
 
-		rows, err := client.IntersectsFeature(feature)
+		opts := pgis.PgisIntersectsOptions{
+			PlacetypeId:  1,
+			IsSuperseded: false,
+			IsDeprecated: false,
+		}
+
+		rows, err := client.IntersectsFeature(feature, &opts)
 
 		if err != nil {
 			log.Fatal(err)
