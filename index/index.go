@@ -298,25 +298,43 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 	log.Println("COUNT", count_total)
 	log.Printf("TIME total %v\n", t2)
 
-	s := "SELECT id, meta FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
 
-	r, err := db.Query(s, str_geom, 0, 0, opts.PlacetypeId)
+	if count_geom > 0 {
 
-	if err != nil {
-		return nil, err
-	}
+		offset := 0
+		limit := 10
+		
+		iters := count_geom / limit
 
-	defer r.Close()
-	for r.Next() {
-		var id int
-		var meta string
-		err = r.Scan(&id, &meta)
+		for i := iters; i > 0; {
+
+			go func(){
+
+			   
+			defer func(){
+
+						}
+				s := "SELECT id, meta FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
+
+				r, err := db.Query(s, str_geom, 0, 0, opts.PlacetypeId)
+
+				if err != nil {
+						log.Println(err)
+				}
+
+				defer r.Close()
+
+				for r.Next() {
+						var id int
+						var meta string
+								err = r.Scan(&id, &meta)
 
 		if err != nil {
 			return nil, err
 		}
 
-		log.Println(id, meta)
+			rows_ch <- id
+	}
 	}
 
 	return rows, nil
