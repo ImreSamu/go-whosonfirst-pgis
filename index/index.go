@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -64,6 +65,13 @@ type PgisRow struct {
 	Meta         string
 	Geom         string
 	Centroid     string
+}
+
+// this is here so we can pass both sql.Row and sql.Rows to the
+// QueryRowToPgisRow function below (20170630/thisisaaronland)
+
+type PgisResultSet interface {
+	Scan(dest ...interface{}) error
 }
 
 type PgisIntersectsOptions struct {
@@ -161,15 +169,6 @@ func (client *PgisClient) Connection() (*sql.DB, error) {
 }
 
 func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOptions) ([]*PgisRow, error) {
-
-	/*
-
-		     DEBUG:root:SELECT id, parent_id, placetype_id, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE (ST_Intersects(ST_GeomFromGeoJSON(%s), geom) OR ST_Intersects(ST_GeomFromGeoJSON(%s), centroid)) AND is_superseded=%s AND is_deprecated=%s AND placetype_id=%s LIMIT 5000 OFFSET 0
-		INFO:root:find intersecting descendants of placetype county (for 85671863 (Francisco Morazán))
-		...
-
-
-	*/
 
 	db, err := client.dbconn()
 
@@ -298,44 +297,91 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 	log.Println("COUNT", count_total)
 	log.Printf("TIME total %v\n", t2)
 
+	t3 := time.Now()
 
 	if count_geom > 0 {
 
 		offset := 0
 		limit := 10
-		
-		iters := count_geom / limit
 
-		for i := iters; i > 0; {
+		rows_ch := make(chan *PgisRow)
 
-			go func(){
+		count_fl := float64(count_geom)
+		limit_fl := float64(limit)
 
-			   
-			defer func(){
+		iters_fl := count_fl / limit_fl
+		iters := int(iters_fl)
 
-						}
-				s := "SELECT id, meta FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
+		i := iters
 
-				r, err := db.Query(s, str_geom, 0, 0, opts.PlacetypeId)
+		count_throttle := 4
+		throttle := make(chan bool, count_throttle)
+
+		for t := 0; t < count_throttle; t++ {
+			throttle <- true
+		}
+
+		for i > 0 {
+
+			<-throttle
+
+			go func(str_geom string, is_superseded int, is_deprecated int, placetype_id int64, offset int, limit int, throttle chan bool) {
+
+				defer func() {
+					done <- true
+					throttle <- true
+				}()
+
+				cols := client.PgisRowQueryColumns()
+
+				ta := time.Now()
+
+				s := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
+
+				log.Printf("%s %d/%d\n", s, offset, limit)
+				
+				r, err := db.Query(s, str_geom, 0, 0, opts.PlacetypeId, offset, limit)
+
+				tb := time.Since(ta)
+
+				log.Printf("%s %v\n", s, tb)
 
 				if err != nil {
-						log.Println(err)
+					log.Println(err)
 				}
 
 				defer r.Close()
 
 				for r.Next() {
-						var id int
-						var meta string
-								err = r.Scan(&id, &meta)
 
-		if err != nil {
-			return nil, err
+					pg_row, err := client.QueryRowToPgisRow(r)
+
+					if err != nil {
+						log.Println(err)
+						return
+					}
+
+					rows_ch <- pg_row
+				}
+
+			}(str_geom, 0, 0, opts.PlacetypeId, offset, limit, throttle)
+
+			offset += limit
 		}
 
-			rows_ch <- id
+		select {
+		case pg_row := <-rows_ch:
+			rows = append(rows, pg_row)
+		case <-done:
+			i--
+		}
 	}
-	}
+
+	t4 := time.Since(t3)
+	log.Printf("TIME %v\n", t4)
+
+	t5 := time.Since(t1)
+	log.Printf("TIME ALL %v\n", t5)
 
 	return rows, nil
 }
@@ -348,31 +394,16 @@ func (client *PgisClient) GetById(id int64) (*PgisRow, error) {
 		return nil, err
 	}
 
-	var wofid int64
-	var parentid int64
-	var placetypeid int64
-	var superseded int
-	var deprecated int
-	var meta string
-	var geom string
-	var centroid string
-
 	sql := fmt.Sprintf("SELECT id, parent_id, placetype_id, is_superseded, is_deprecated, meta, ST_AsGeoJSON(geom), ST_AsGeoJSON(centroid) FROM whosonfirst WHERE id=$1")
-
 	row := db.QueryRow(sql, id)
-	err = row.Scan(&wofid, &parentid, &placetypeid, &superseded, &deprecated, &meta, &geom, &centroid)
+
+	pg_row, err := client.QueryRowToPgisRow(row)
 
 	if err != nil {
 		return nil, err
 	}
 
-	pgrow, err := NewPgisRow(wofid, parentid, placetypeid, superseded, deprecated, meta, geom, centroid)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return pgrow, nil
+	return pg_row, nil
 }
 
 func (client *PgisClient) IndexFile(abs_path string, collection string) error {
@@ -982,4 +1013,52 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 	}
 
 	return nil
+}
+
+func (client *PgisClient) PgisRowColumns() []string {
+
+	cols := []string{
+		"id",
+		"parent_id",
+		"placetype_id",
+		"is_superseded",
+		"is_deprecated",
+		"meta",
+		"ST_AsGeoJSON(geom)",
+		"ST_AsGeoJSON(centroid)",
+	}
+
+	return cols
+}
+
+func (client *PgisClient) PgisRowQueryColumns() string {
+
+	cols := client.PgisRowColumns()
+	return strings.Join(cols, ",")
+}
+
+func (client *PgisClient) QueryRowToPgisRow(row PgisResultSet) (*PgisRow, error) {
+
+	var wofid int64
+	var parentid int64
+	var placetypeid int64
+	var superseded int
+	var deprecated int
+	var meta string
+	var geom string
+	var centroid string
+
+	err := row.Scan(&wofid, &parentid, &placetypeid, &superseded, &deprecated, &meta, &geom, &centroid)
+
+	if err != nil {
+		return nil, err
+	}
+
+	pgrow, err := NewPgisRow(wofid, parentid, placetypeid, superseded, deprecated, meta, geom, centroid)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return pgrow, nil
 }
