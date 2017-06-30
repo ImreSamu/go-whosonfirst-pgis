@@ -186,7 +186,21 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 		return nil, err
 	}
 
+	str_geom := geom.String()
+
 	// first get the counts - we might actually just get rid of this
+
+	/*
+
+./bin/wof-pgis-intersects -placetype neighbourhood -pgis-user postgres -pgis-host localost /usr/local/data/whosonfirst-data/data/859/225/83/85922583.geojson
+2017/06/30 17:15:01 TIME SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 752.039425ms
+2017/06/30 17:15:01 SUBTOTAL 118 (118)
+2017/06/30 17:15:07 TIME SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 6.55115094s
+2017/06/30 17:15:07 SUBTOTAL 245 (127)
+2017/06/30 17:15:07 COUNT 245
+2017/06/30 17:15:07 TIME total 6.551369378s
+
+	*/
 
 	sql_geom := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
 	sql_centroid := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
@@ -202,15 +216,22 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 	ch := make(chan int)
 	done := make(chan bool)
 
+	t1 := time.Now()
+
 	for _, sql := range sql_counts {
 
-		go func() {
+		go func(sql string, str_geom string, is_superseded int, is_deprecated int, placetype_id int64) {
 
 			defer func() {
 				done <- true
 			}()
 
-			row := db.QueryRow(sql)
+			ta := time.Now()
+
+			row := db.QueryRow(sql, str_geom, is_superseded, is_deprecated, placetype_id)
+
+			tb := time.Since(ta)
+			log.Printf("TIME %s %v\n", sql, tb)
 
 			var count_rows int
 			err = row.Scan(&count_rows)
@@ -221,17 +242,24 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 			}
 
 			ch <- count_rows
-		}()
+
+		}(sql, str_geom, 0, 0, opts.PlacetypeId)
 	}
 
 	for n := count_queries; n > 0; {
 		select {
 		case c := <-ch:
 			count_total += c
+	log.Printf("SUBTOTAL %d (%d)\n", count_total, c)
 		case <-done:
 			n--
 		}
 	}
+
+	t2 := time.Since(t1)
+
+	log.Println("COUNT", count_total)
+	log.Printf("TIME total %v\n", t2)
 
 	return rows, nil
 }
