@@ -30,10 +30,10 @@ func main() {
 		*verbose = true
 	}
 
-	pt,err := placetypes.GetPlacetypeByName(*placetype)
+	pt, err := placetypes.GetPlacetypeByName(*placetype)
 
 	if err != nil {
-	   log.Fatal(err)
+		log.Fatal(err)
 	}
 
 	client, err := pgis.NewPgisClient(*pgis_host, *pgis_port, *pgis_user, *pgis_pswd, *pgis_dbname, *pgis_maxconns)
