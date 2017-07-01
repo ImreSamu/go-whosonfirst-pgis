@@ -18,6 +18,7 @@ func main() {
 	pgis_dbname := flag.String("pgis-database", "whosonfirst", "The name of your PostgreSQL database.")
 	pgis_maxconns := flag.Int("pgis-maxconns", 10, "The maximum number of connections to use with your PostgreSQL database.")
 
+	per_page := flag.Int("per-page", 1000, "...")
 	placetype := flag.String("placetype", "", "...")
 
 	verbose := flag.Bool("verbose", false, "Be chatty about what's happening. This is automatically enabled if the -debug flag is set.")
@@ -61,13 +62,11 @@ func main() {
 			log.Fatal(err)
 		}
 
-		opts := pgis.PgisIntersectsOptions{
-			PlacetypeId:  pt.Id,
-			IsSuperseded: false,
-			IsDeprecated: false,
-		}
+		opts := pgis.NewDefaultPgisIntersectsOptions()
+		opts.PlacetypeId = pt.Id
+		opts.PerPage = *per_page
 
-		rows, err := client.IntersectsFeature(feature, &opts)
+		rows, err := client.IntersectsFeature(feature, opts)
 
 		if err != nil {
 			log.Fatal(err)

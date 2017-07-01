@@ -16,6 +16,7 @@ import (
 	"github.com/whosonfirst/go-whosonfirst-utils"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,6 +79,21 @@ type PgisIntersectsOptions struct {
 	PlacetypeId  int64
 	IsSuperseded bool
 	IsDeprecated bool
+	NumProcesses int
+	PerPage      int
+}
+
+func NewDefaultPgisIntersectsOptions() *PgisIntersectsOptions {
+
+	opts := PgisIntersectsOptions{
+		PlacetypeId:  -1,
+		IsSuperseded: false,
+		IsDeprecated: false,
+		NumProcesses: 4,
+		PerPage:      1000,
+	}
+
+	return &opts
 }
 
 func NewPgisRow(id int64, pid int64, ptid int64, superseded int, deprecated int, meta string, geom string, centroid string) (*PgisRow, error) {
@@ -187,20 +203,6 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 	str_geom := geom.String()
 
-	// first get the counts - we might actually just get rid of this
-
-	/*
-
-		./bin/wof-pgis-intersects -placetype neighbourhood -pgis-user postgres -pgis-host localost /usr/local/data/whosonfirst-data/data/859/225/83/85922583.geojson
-		2017/06/30 17:15:01 TIME SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 752.039425ms
-		2017/06/30 17:15:01 SUBTOTAL 118 (118)
-		2017/06/30 17:15:07 TIME SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 6.55115094s
-		2017/06/30 17:15:07 SUBTOTAL 245 (127)
-		2017/06/30 17:15:07 COUNT 245
-		2017/06/30 17:15:07 TIME total 6.551369378s
-
-	*/
-
 	sql_geom := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
 	sql_centroid := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND geom IS NULL AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
 
@@ -218,6 +220,7 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 	ch_geom := make(chan int)
 	ch_centroid := make(chan int)
 
+	err_ch := make(chan error)
 	done := make(chan bool)
 
 	t1 := time.Now()
@@ -228,19 +231,18 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 			done <- true
 		}()
 
-		ta := time.Now()
+		// ta := time.Now()
 
 		row := db.QueryRow(sql, str_geom, is_superseded, is_deprecated, placetype_id)
 
-		tb := time.Since(ta)
-		log.Printf("TIME %s %v\n", sql, tb)
-		log.Println(is_superseded, is_deprecated, placetype_id)
+		// tb := time.Since(ta)
+		// log.Printf("TIME %s %v\n", sql, tb)
 
 		var count_rows int
 		err = row.Scan(&count_rows)
 
 		if err != nil {
-			log.Println(err)
+			err_ch <- err
 			return
 		}
 
@@ -254,19 +256,18 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 			done <- true
 		}()
 
-		ta := time.Now()
+		// ta := time.Now()
 
 		row := db.QueryRow(sql, str_geom, is_superseded, is_deprecated, placetype_id)
 
-		tb := time.Since(ta)
-		log.Printf("TIME %s %v\n", sql, tb)
-		log.Println(is_superseded, is_deprecated, placetype_id)
+		//  tb := time.Since(ta)
+		// log.Printf("TIME %s %v\n", sql, tb)
 
 		var count_rows int
 		err = row.Scan(&count_rows)
 
 		if err != nil {
-			log.Println(err)
+			err_ch <- err
 			return
 		}
 
@@ -284,7 +285,8 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 			count_centroid = c
 			count_total += c
 			log.Printf("SUBTOTAL %d (%d)\n", count_total, c)
-
+		case err := <-err_ch:
+			return nil, err
 		case <-done:
 			n--
 		}
@@ -303,18 +305,18 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 	if count_geom > 0 {
 
-		limit := 10
+		limit := opts.PerPage
 
 		rows_ch := make(chan *PgisRow)
-		err_ch := make(chan error)
 
 		count_fl := float64(count_geom)
 		limit_fl := float64(limit)
 
 		iters_fl := count_fl / limit_fl
+		iters_fl = math.Ceil(iters_fl)
 		iters := int(iters_fl)
 
-		count_throttle := 4
+		count_throttle := opts.NumProcesses
 		throttle := make(chan bool, count_throttle)
 
 		for t := 0; t < count_throttle; t++ {
@@ -323,7 +325,7 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 		x := 0
 
-		for offset := 0; offset < count_geom; offset += limit {
+		for offset := 0; offset <= count_geom; offset += limit {
 
 			x += 1
 
@@ -391,8 +393,6 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 	t5 := time.Since(t1)
 	log.Printf("TIME ALL %v\n", t5)
-
-	log.Println("COUNT", len(rows))
 
 	return rows, nil
 }
