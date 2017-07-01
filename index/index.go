@@ -299,20 +299,20 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 	t3 := time.Now()
 
+	// ./bin/wof-pgis-intersects -placetype neighbourhood -pgis-user postgres -pgis-host locahost /usr/local/data/whosonfirst-data/data/859/225/83/85922583.geojson
+
 	if count_geom > 0 {
 
-		offset := 0
 		limit := 10
 
 		rows_ch := make(chan *PgisRow)
+		err_ch := make(chan error)
 
 		count_fl := float64(count_geom)
 		limit_fl := float64(limit)
 
 		iters_fl := count_fl / limit_fl
 		iters := int(iters_fl)
-
-		i := iters
 
 		count_throttle := 4
 		throttle := make(chan bool, count_throttle)
@@ -321,11 +321,15 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 			throttle <- true
 		}
 
-		for i > 0 {
+		x := 0
 
-			<-throttle
+		for offset := 0; offset < count_geom; offset += limit {
 
-			go func(str_geom string, is_superseded int, is_deprecated int, placetype_id int64, offset int, limit int, throttle chan bool) {
+			x += 1
+
+			go func(x int, str_geom string, is_superseded int, is_deprecated int, placetype_id int64, offset int, limit int, throttle chan bool) {
+
+				<-throttle
 
 				defer func() {
 					done <- true
@@ -334,20 +338,20 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 				cols := client.PgisRowQueryColumns()
 
-				ta := time.Now()
+				// ta := time.Now()
 
 				s := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
 
-				log.Printf("%s %d/%d\n", s, offset, limit)
-				
+				// log.Printf("[%d] %s %d/%d\n", x, s, offset, limit)
+
 				r, err := db.Query(s, str_geom, 0, 0, opts.PlacetypeId, offset, limit)
 
-				tb := time.Since(ta)
-
-				log.Printf("%s %v\n", s, tb)
+				// tb := time.Since(ta)
+				// log.Printf("[%d] %s %v\n", x, s, tb)
 
 				if err != nil {
-					log.Println(err)
+					err_ch <- err
+					return
 				}
 
 				defer r.Close()
@@ -357,24 +361,29 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 					pg_row, err := client.QueryRowToPgisRow(r)
 
 					if err != nil {
-						log.Println(err)
+						err_ch <- err
 						return
 					}
 
 					rows_ch <- pg_row
 				}
 
-			}(str_geom, 0, 0, opts.PlacetypeId, offset, limit, throttle)
+			}(x, str_geom, 0, 0, opts.PlacetypeId, offset, limit, throttle)
 
-			offset += limit
 		}
 
-		select {
-		case pg_row := <-rows_ch:
-			rows = append(rows, pg_row)
-		case <-done:
-			i--
+		for i := iters; i > 0; {
+			select {
+			case pg_row := <-rows_ch:
+				rows = append(rows, pg_row)
+			case err := <-err_ch:
+				// KILL ALL THE OTHER CHANNELS...
+				return nil, err
+			case <-done:
+				i--
+			}
 		}
+
 	}
 
 	t4 := time.Since(t3)
@@ -382,6 +391,8 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 	t5 := time.Since(t1)
 	log.Printf("TIME ALL %v\n", t5)
+
+	log.Println("COUNT", len(rows))
 
 	return rows, nil
 }

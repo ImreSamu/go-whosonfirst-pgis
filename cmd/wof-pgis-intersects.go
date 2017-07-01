@@ -73,6 +73,9 @@ func main() {
 			log.Fatal(err)
 		}
 
+		log.Println("ROWS", len(rows))
+		continue
+
 		for _, row := range rows {
 			log.Println(row)
 		}
