@@ -266,7 +266,7 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 		sql := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
 
-		client.FetchIntersectsAsync(sql, count_geom, str_geom, opts, rows_ch, done_ch, err_ch)
+		go client.FetchIntersectsAsync(sql, count_geom, str_geom, opts, rows_ch, done_ch, err_ch)
 		fetching += 1
 	}
 
@@ -274,7 +274,7 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 		sql := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND geom IS NULL AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
 
-		client.FetchIntersectsAsync(sql, count_centroid, str_geom, opts, rows_ch, done_ch, err_ch)
+		go client.FetchIntersectsAsync(sql, count_centroid, str_geom, opts, rows_ch, done_ch, err_ch)
 		fetching += 1
 	}
 
@@ -282,9 +282,8 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 		select {
 		case pg_row := <-rows_ch:
 			rows = append(rows, pg_row)
-		case err := <-err_ch:
-			// KILL ALL THE OTHER CHANNELS...
-			return nil, err
+		case err := <-err_ch:			
+			return nil, err // KILL ALL THE OTHER CHANNELS...
 		case <-done_ch:
 			f--
 		}
