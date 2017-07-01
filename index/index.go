@@ -77,8 +77,8 @@ type PgisResultSet interface {
 
 type PgisIntersectsOptions struct {
 	PlacetypeId  int64
-	IsSuperseded bool
-	IsDeprecated bool
+	IsSuperseded int
+	IsDeprecated int
 	NumProcesses int
 	PerPage      int
 }
@@ -87,8 +87,8 @@ func NewDefaultPgisIntersectsOptions() *PgisIntersectsOptions {
 
 	opts := PgisIntersectsOptions{
 		PlacetypeId:  -1,
-		IsSuperseded: false,
-		IsDeprecated: false,
+		IsSuperseded: 0,
+		IsDeprecated: 0,
 		NumProcesses: 4,
 		PerPage:      1000,
 	}
@@ -186,12 +186,6 @@ func (client *PgisClient) Connection() (*sql.DB, error) {
 
 func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOptions) ([]*PgisRow, error) {
 
-	db, err := client.dbconn()
-
-	if err != nil {
-		return nil, err
-	}
-
 	rows := make([]*PgisRow, 0)
 
 	geom := gjson.GetBytes(f, "geometry")
@@ -206,88 +200,48 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 	sql_geom := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
 	sql_centroid := "SELECT COUNT(id) FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND geom IS NULL AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4"
 
-	sql_counts := []string{
-		sql_geom,
-		sql_centroid,
-	}
-
-	count_queries := len(sql_counts)
-
 	count_geom := 0
 	count_centroid := 0
 	count_total := 0
 
-	ch_geom := make(chan int)
-	ch_centroid := make(chan int)
+	geom_ch := make(chan int)
+	centroid_ch := make(chan int)
 
 	err_ch := make(chan error)
-	done := make(chan bool)
+	done_ch := make(chan bool)
 
 	t1 := time.Now()
 
-	go func(sql string, str_geom string, is_superseded int, is_deprecated int, placetype_id int64) {
+	get_count := func(sql string, str_geom string, opts *PgisIntersectsOptions, count_ch chan int, done_ch chan bool, err_ch chan error) {
 
 		defer func() {
-			done <- true
+			done_ch <- true
 		}()
 
-		// ta := time.Now()
-
-		row := db.QueryRow(sql, str_geom, is_superseded, is_deprecated, placetype_id)
-
-		// tb := time.Since(ta)
-		// log.Printf("TIME %s %v\n", sql, tb)
-
-		var count_rows int
-		err = row.Scan(&count_rows)
+		count_rows, err := client.CountIntersects(sql, str_geom, opts)
 
 		if err != nil {
 			err_ch <- err
 			return
 		}
 
-		ch_geom <- count_rows
+		count_ch <- count_rows
+	}
 
-	}(sql_geom, str_geom, 0, 0, opts.PlacetypeId)
+	go get_count(sql_geom, str_geom, opts, geom_ch, done_ch, err_ch)
+	go get_count(sql_centroid, str_geom, opts, centroid_ch, done_ch, err_ch)
 
-	go func(sql string, str_geom string, is_superseded int, is_deprecated int, placetype_id int64) {
-
-		defer func() {
-			done <- true
-		}()
-
-		// ta := time.Now()
-
-		row := db.QueryRow(sql, str_geom, is_superseded, is_deprecated, placetype_id)
-
-		//  tb := time.Since(ta)
-		// log.Printf("TIME %s %v\n", sql, tb)
-
-		var count_rows int
-		err = row.Scan(&count_rows)
-
-		if err != nil {
-			err_ch <- err
-			return
-		}
-
-		ch_centroid <- count_rows
-
-	}(sql_centroid, str_geom, 0, 0, opts.PlacetypeId)
-
-	for n := count_queries; n > 0; {
+	for n := 2; n > 0; {
 		select {
-		case c := <-ch_geom:
+		case c := <-geom_ch:
 			count_geom = c
 			count_total += c
-			log.Printf("SUBTOTAL %d (%d)\n", count_total, c)
-		case c := <-ch_centroid:
+		case c := <-centroid_ch:
 			count_centroid = c
 			count_total += c
-			log.Printf("SUBTOTAL %d (%d)\n", count_total, c)
 		case err := <-err_ch:
 			return nil, err
-		case <-done:
+		case <-done_ch:
 			n--
 		}
 	}
@@ -303,89 +257,37 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 
 	// ./bin/wof-pgis-intersects -placetype neighbourhood -pgis-user postgres -pgis-host locahost /usr/local/data/whosonfirst-data/data/859/225/83/85922583.geojson
 
+	rows_ch := make(chan *PgisRow)
+	fetching := 0
+
+	cols := client.PgisRowQueryColumns()
+
 	if count_geom > 0 {
 
-		limit := opts.PerPage
+		sql := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
 
-		rows_ch := make(chan *PgisRow)
+		client.FetchIntersectsAsync(sql, count_geom, str_geom, opts, rows_ch, done_ch, err_ch)
+		fetching += 1
+	}
 
-		count_fl := float64(count_geom)
-		limit_fl := float64(limit)
+	if count_centroid > 0 {
 
-		iters_fl := count_fl / limit_fl
-		iters_fl = math.Ceil(iters_fl)
-		iters := int(iters_fl)
+		sql := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), centroid) AND geom IS NULL AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
 
-		count_throttle := opts.NumProcesses
-		throttle := make(chan bool, count_throttle)
+		client.FetchIntersectsAsync(sql, count_centroid, str_geom, opts, rows_ch, done_ch, err_ch)
+		fetching += 1
+	}
 
-		for t := 0; t < count_throttle; t++ {
-			throttle <- true
+	for f := fetching; f > 0; {
+		select {
+		case pg_row := <-rows_ch:
+			rows = append(rows, pg_row)
+		case err := <-err_ch:
+			// KILL ALL THE OTHER CHANNELS...
+			return nil, err
+		case <-done_ch:
+			f--
 		}
-
-		x := 0
-
-		for offset := 0; offset <= count_geom; offset += limit {
-
-			x += 1
-
-			go func(x int, str_geom string, is_superseded int, is_deprecated int, placetype_id int64, offset int, limit int, throttle chan bool) {
-
-				<-throttle
-
-				defer func() {
-					done <- true
-					throttle <- true
-				}()
-
-				cols := client.PgisRowQueryColumns()
-
-				// ta := time.Now()
-
-				s := fmt.Sprintf("SELECT %s FROM whosonfirst WHERE ST_Intersects(ST_GeomFromGeoJSON($1), geom) AND is_superseded=$2 AND is_deprecated=$3 AND placetype_id=$4 OFFSET $5 LIMIT $6", cols)
-
-				// log.Printf("[%d] %s %d/%d\n", x, s, offset, limit)
-
-				r, err := db.Query(s, str_geom, 0, 0, opts.PlacetypeId, offset, limit)
-
-				// tb := time.Since(ta)
-				// log.Printf("[%d] %s %v\n", x, s, tb)
-
-				if err != nil {
-					err_ch <- err
-					return
-				}
-
-				defer r.Close()
-
-				for r.Next() {
-
-					pg_row, err := client.QueryRowToPgisRow(r)
-
-					if err != nil {
-						err_ch <- err
-						return
-					}
-
-					rows_ch <- pg_row
-				}
-
-			}(x, str_geom, 0, 0, opts.PlacetypeId, offset, limit, throttle)
-
-		}
-
-		for i := iters; i > 0; {
-			select {
-			case pg_row := <-rows_ch:
-				rows = append(rows, pg_row)
-			case err := <-err_ch:
-				// KILL ALL THE OTHER CHANNELS...
-				return nil, err
-			case <-done:
-				i--
-			}
-		}
-
 	}
 
 	t4 := time.Since(t3)
@@ -395,6 +297,114 @@ func (client *PgisClient) IntersectsFeature(f []byte, opts *PgisIntersectsOption
 	log.Printf("TIME ALL %v\n", t5)
 
 	return rows, nil
+}
+
+func (client *PgisClient) CountIntersects(sql string, str_geom string, opts *PgisIntersectsOptions) (int, error) {
+
+	db, err := client.dbconn()
+
+	if err != nil {
+		return -1, err
+	}
+
+	// ta := time.Now()
+
+	row := db.QueryRow(sql, str_geom, opts.IsSuperseded, opts.IsDeprecated, opts.PlacetypeId)
+
+	// tb := time.Since(ta)
+	// log.Printf("TIME %s %v\n", sql, tb)
+
+	var count_rows int
+	err = row.Scan(&count_rows)
+
+	if err != nil {
+		return -1, err
+	}
+
+	return count_rows, nil
+}
+
+func (client *PgisClient) FetchIntersectsAsync(sql string, count_expected int, str_geom string, opts *PgisIntersectsOptions, rows_ch chan *PgisRow, done_ch chan bool, err_ch chan error) {
+
+
+        defer func(){
+		done_ch <- true
+	}()
+	
+	db, err := client.dbconn()
+
+	if err != nil {
+	   	err_ch <- err
+		return
+	}
+
+	limit := opts.PerPage
+
+	count_fl := float64(count_expected)
+	limit_fl := float64(limit)
+
+	iters_fl := count_fl / limit_fl
+	iters_fl = math.Ceil(iters_fl)
+	iters := int(iters_fl)
+
+	count_throttle := opts.NumProcesses
+
+	throttle_ch := make(chan bool, count_throttle)
+	fetch_ch := make(chan bool)
+	
+	for t := 0; t < count_throttle; t++ {
+		throttle_ch <- true
+	}
+
+	for offset := 0; offset <= count_expected; offset += limit {
+
+		go func(str_geom string, opts *PgisIntersectsOptions, offset int, limit int) {
+
+			<-throttle_ch
+
+			defer func() {
+				fetch_ch <- true
+				throttle_ch <- true
+			}()
+
+			// ta := time.Now()
+			// log.Printf("[%d] %s %d/%d\n", x, s, offset, limit)
+
+			r, err := db.Query(sql, str_geom, opts.IsSuperseded, opts.IsDeprecated, opts.PlacetypeId, offset, limit)
+
+			// tb := time.Since(ta)
+			// log.Printf("[%d] %s %v\n", x, s, tb)
+
+			if err != nil {
+				err_ch <- err
+				return
+			}
+
+			defer r.Close()
+
+			for r.Next() {
+
+				pg_row, err := client.QueryRowToPgisRow(r)
+
+				if err != nil {
+					err_ch <- err
+					return
+				}
+
+				rows_ch <- pg_row
+			}
+
+		}(str_geom, opts, offset, limit)
+
+	}
+
+	for i := iters; i > 0; {
+		select {
+		case <-fetch_ch:
+			i--
+		}
+	}
+
 }
 
 func (client *PgisClient) GetById(id int64) (*PgisRow, error) {
