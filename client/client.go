@@ -504,7 +504,7 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 				
 				row := result.Row()
 				
-				err := client.PruneRow(row.(PgisRow), data_root, delete)
+				err := client.PruneRow(row.(PgisPruningRow), data_root, delete)
 
 				if err != nil {
 					w.ErrorChannel <- err
@@ -524,7 +524,7 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 	return nil
 }
 
-func (client *PgisClient) PruneRow(row PgisRow, data_root string, delete bool) error {
+func (client *PgisClient) PruneRow(row PgisPruningRow, data_root string, delete bool) error {
 
 	return nil
 	var meta Meta
