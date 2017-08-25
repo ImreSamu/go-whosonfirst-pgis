@@ -12,6 +12,7 @@ import (
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2/utils"
 	"github.com/whosonfirst/go-whosonfirst-log"
 	"github.com/whosonfirst/go-whosonfirst-placetypes"
+	"github.com/whosonfirst/go-whosonfirst-pgis"
 	"github.com/whosonfirst/go-whosonfirst-timer"
 	"github.com/whosonfirst/go-whosonfirst-uri"
 	"math"
@@ -29,6 +30,15 @@ type Meta struct {
 	Hierarchy []map[string]int64 `json:"wof:hierarchy"`
 }
 
+type PgisResultWrapper struct {
+     pgis.PgisResult
+     result interface{}
+}
+
+func (wr *PgisResultWrapper) Row() interface{} {
+     return wr.result
+}
+
 type PgisRow struct {
 	Id           int64
 	ParentId     int64
@@ -40,16 +50,7 @@ type PgisRow struct {
 	Centroid     string
 }
 
-// this is here so we can pass both sql.Row and sql.Rows to the
-// QueryRowToPgisRow function below (20170630/thisisaaronland)
-
-type PgisResultSet interface {
-	Scan(dest ...interface{}) error
-}
-
-type PgisQueryRowFunc func(row PgisResultSet) (*PgisRow, error)
-
-func QueryRowToPgisRow(row PgisResultSet) (*PgisRow, error) {
+func QueryRowToPgisRow(row pgis.PgisResultSet) (pgis.PgisResult, error) {
 
 	var wofid int64
 	var parentid int64
@@ -66,16 +67,20 @@ func QueryRowToPgisRow(row PgisResultSet) (*PgisRow, error) {
 		return nil, err
 	}
 
-	pgrow, err := NewPgisRow(wofid, parentid, placetypeid, superseded, deprecated, meta, geom, centroid)
+	result, err := NewPgisRow(wofid, parentid, placetypeid, superseded, deprecated, meta, geom, centroid)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return pgrow, nil
+	wr := PgisResultWrapper{
+		result: result,
+	}
+
+	return &wr, nil
 }
 
-func QueryRowToPgisRowForPruning(row PgisResultSet) (*PgisRow, error) {
+func QueryRowToPgisRowForPruning(row pgis.PgisResultSet) (pgis.PgisResult, error) {
 
 	var wofid int64
 	var meta string
@@ -86,13 +91,17 @@ func QueryRowToPgisRowForPruning(row PgisResultSet) (*PgisRow, error) {
 		return nil, err
 	}
 
-	pgrow, err := NewPgisRow(wofid, -1, -1, -1, -1, meta, "", "")
+	result, err := NewPgisRow(wofid, -1, -1, -1, -1, meta, "", "")
 
 	if err != nil {
 		return nil, err
 	}
 
-	return pgrow, nil
+	wr := PgisResultWrapper{
+		result: result,
+	}
+
+	return &wr, nil
 }
 
 func NewPgisRow(id int64, pid int64, ptid int64, superseded int, deprecated int, meta string, geom string, centroid string) (*PgisRow, error) {
@@ -113,11 +122,11 @@ func NewPgisRow(id int64, pid int64, ptid int64, superseded int, deprecated int,
 
 type PgisAsyncWorker struct {
 	Client        *PgisClient
-	QueryFunc     PgisQueryRowFunc
+	QueryFunc     pgis.PgisQueryRowFunc
 	CountExpected int
 	NumProcesses  int
 	PerPage       int
-	ResultChannel chan *PgisRow
+	ResultChannel chan pgis.PgisResult
 	DoneChannel   chan bool
 	ErrorChannel  chan error
 }
@@ -130,7 +139,7 @@ func NewPgisAsyncWorker(client *PgisClient, expected int, per_page int, num_proc
 		CountExpected: expected,
 		PerPage:       per_page,
 		NumProcesses:  num_procs,
-		ResultChannel: make(chan *PgisRow),
+		ResultChannel: make(chan pgis.PgisResult),
 		DoneChannel:   make(chan bool),
 		ErrorChannel:  make(chan error),
 	}
@@ -479,7 +488,7 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 
 	for f := fetching; f > 0; {
 		select {
-		case row := <-w.ResultChannel:
+		case result := <-w.ResultChannel:
 
 			<-throttle_ch
 
@@ -488,8 +497,10 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 				defer func() {
 					throttle_ch <- true
 				}()
-
-				err := client.PruneRow(row, data_root, delete)
+				
+				row := result.Row()
+				
+				err := client.PruneRow(row.(PgisRow), data_root, delete)
 
 				if err != nil {
 					w.ErrorChannel <- err
@@ -509,7 +520,7 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 	return nil
 }
 
-func (client *PgisClient) PruneRow(row *PgisRow, data_root string, delete bool) error {
+func (client *PgisClient) PruneRow(row PgisRow, data_root string, delete bool) error {
 
 	return nil
 	var meta Meta
