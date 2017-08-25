@@ -50,6 +50,11 @@ type PgisRow struct {
 	Centroid     string
 }
 
+type PgisPruningRow struct {
+	Id           int64
+	Meta         string
+}
+
 func QueryRowToPgisRow(row pgis.PgisResultSet) (pgis.PgisResult, error) {
 
 	var wofid int64
@@ -91,11 +96,10 @@ func QueryRowToPgisRowForPruning(row pgis.PgisResultSet) (pgis.PgisResult, error
 		return nil, err
 	}
 
-	result, err := NewPgisRow(wofid, -1, -1, -1, -1, meta, "", "")
-
-	if err != nil {
-		return nil, err
-	}
+	result := PgisPruningRow{
+	       Id: wofid,
+	       Meta: meta,
+        }
 
 	wr := PgisResultWrapper{
 		result: result,
