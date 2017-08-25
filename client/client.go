@@ -11,8 +11,8 @@ import (
 	wof "github.com/whosonfirst/go-whosonfirst-geojson-v2/properties/whosonfirst"
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2/utils"
 	"github.com/whosonfirst/go-whosonfirst-log"
-	"github.com/whosonfirst/go-whosonfirst-placetypes"
 	"github.com/whosonfirst/go-whosonfirst-pgis"
+	"github.com/whosonfirst/go-whosonfirst-placetypes"
 	"github.com/whosonfirst/go-whosonfirst-timer"
 	"github.com/whosonfirst/go-whosonfirst-uri"
 	"math"
@@ -31,12 +31,12 @@ type Meta struct {
 }
 
 type PgisResultWrapper struct {
-     pgis.PgisResult
-     result interface{}
+	pgis.PgisResult
+	result interface{}
 }
 
 func (wr *PgisResultWrapper) Row() interface{} {
-     return wr.result
+	return wr.result
 }
 
 type PgisRow struct {
@@ -51,8 +51,8 @@ type PgisRow struct {
 }
 
 type PgisPruningRow struct {
-	Id           int64
-	Meta         string
+	Id   int64
+	Meta string
 }
 
 func QueryRowToPgisRow(row pgis.PgisResultSet) (pgis.PgisResult, error) {
@@ -97,9 +97,9 @@ func QueryRowToPgisRowForPruning(row pgis.PgisResultSet) (pgis.PgisResult, error
 	}
 
 	result := PgisPruningRow{
-	       Id: wofid,
-	       Meta: meta,
-        }
+		Id:   wofid,
+		Meta: meta,
+	}
 
 	wr := PgisResultWrapper{
 		result: result,
@@ -436,12 +436,12 @@ func (client *PgisClient) IndexFeature(feature geojson.Feature, collection strin
 
 }
 
-func (client *PgisClient) Prune(data_root string, delete bool) error {
+func (client *PgisClient) CountAll() (int, error) {
 
 	db, err := client.dbconn()
 
 	if err != nil {
-		return err
+		return -1, err
 	}
 
 	sql_count := "SELECT COUNT(id) FROM whosonfirst"
@@ -452,10 +452,27 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 	err = row.Scan(&count_rows)
 
 	if err != nil {
+		return -1, err
+	}
+
+	return count_rows, nil
+}
+
+func (client *PgisClient) QueryAll(sql string, query_func pgis.PgisQueryRowFunc, result_func pgis.PgisQueryResultFunc) error {
+
+	count_rows, err := client.CountAll()
+
+	if err != nil {
 		return err
 	}
 
-	client.Logger.Status("PRUNE %d records", count_rows)
+	tm, err := timer.NewDefaultTimer()
+
+	if err != nil {
+		return err
+	}
+
+	defer tm.Stop()
 
 	limit := 10000
 	procs := runtime.NumCPU() * 2
@@ -466,21 +483,9 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 		return err
 	}
 
-	w.QueryFunc = QueryRowToPgisRowForPruning
+	w.QueryFunc = query_func
 
-	go w.Query("SELECT id, meta FROM whosonfirst")
-
-	tm, err := timer.NewDefaultTimer()
-
-	if err != nil {
-		w.ErrorChannel <- err
-		return err
-	}
-
-	defer tm.Stop()
-
-	fetching := 1
-	count := 0
+	go w.Query(sql)
 
 	count_throttle := 100
 
@@ -490,38 +495,47 @@ func (client *PgisClient) Prune(data_root string, delete bool) error {
 		throttle_ch <- true
 	}
 
-	for f := fetching; f > 0; {
+	for {
 		select {
 		case result := <-w.ResultChannel:
 
 			<-throttle_ch
 
-			go func() {
-
-				defer func() {
-					throttle_ch <- true
-				}()
-				
-				row := result.Row()
-				
-				err := client.PruneRow(row.(PgisPruningRow), data_root, delete)
-
-				if err != nil {
-					w.ErrorChannel <- err
-				}
-
-				count += 1
-			}()
+			go result_func(result, throttle_ch, w.ErrorChannel)
 
 		case err := <-w.ErrorChannel:
 			return err
 		case <-w.DoneChannel:
-			f--
+			break
 		}
 	}
 
-	client.Logger.Status("Pruned %d", count)
 	return nil
+}
+
+func (client *PgisClient) Prune(data_root string, delete bool) error {
+
+	sql := "SELECT id, meta FROM whosonfirst"
+	query_func := QueryRowToPgisRowForPruning
+
+	result_func := func(result pgis.PgisResult, throttle_ch chan bool, error_ch chan error) error {
+
+		defer func() {
+			throttle_ch <- true
+		}()
+
+		row := result.Row().(PgisPruningRow)
+
+		err := client.PruneRow(row, data_root, delete)
+
+		if err != nil {
+			error_ch <- err
+		}
+
+		return nil
+	}
+
+	return client.QueryAll(sql, query_func, result_func)
 }
 
 func (client *PgisClient) PruneRow(row PgisPruningRow, data_root string, delete bool) error {
