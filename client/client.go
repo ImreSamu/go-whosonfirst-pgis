@@ -516,6 +516,7 @@ func (client *PgisClient) QueryAll(sql string, query_func pgis.PgisQueryRowFunc,
 func (client *PgisClient) Prune(data_root string, delete bool) error {
 
 	sql := "SELECT id, meta FROM whosonfirst"
+
 	query_func := QueryRowToPgisRowForPruning
 
 	result_func := func(result pgis.PgisResult, throttle_ch chan bool, error_ch chan error) error {
