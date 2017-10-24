@@ -10,6 +10,7 @@ self:   prep
 	if test -d src/github.com/whosonfirst/go-whosonfirst-pgis; then rm -rf src/github.com/whosonfirst/go-whosonfirst-pgis; fi
 	mkdir -p src/github.com/whosonfirst/go-whosonfirst-pgis
 	cp -r client src/github.com/whosonfirst/go-whosonfirst-pgis/client
+	cp -r flags src/github.com/whosonfirst/go-whosonfirst-pgis/flags
 	cp -r vendor/* src/
 
 rmdeps:
