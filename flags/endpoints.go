@@ -16,13 +16,13 @@ func (e *Endpoints) Set(value string) error {
 	return nil
 }
 
-func (e *Endpoints) ToClients() ([]*pgis.PgisClient, error) {
+func (e *Endpoints) ToClients() ([]*client.PgisClient, error) {
 
-	clients := make([]*pgis.PgisClient, 0)
+	clients := make([]*client.PgisClient, 0)
 
 	for _, dsn := range *e {
 
-		cl, err := pgis.NewPgisClientWithDSN(dsn, 10)
+		cl, err := client.NewPgisClientWithDSN(dsn, 10)
 
 		if err != nil {
 			return nil, err

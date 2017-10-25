@@ -7,9 +7,8 @@ import (
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2"
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2/properties/geometry"
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2/properties/whosonfirst"
+	"github.com/whosonfirst/go-whosonfirst-pgis/client"
 	"github.com/whosonfirst/go-whosonfirst-placetypes"
-	"github.com/whosonfirst/go-whosonfirst-tile38"
-	"github.com/whosonfirst/go-whosonfirst-tile38/util"
 	"github.com/whosonfirst/go-whosonfirst-uri"
 	"log"
 	"strconv"
@@ -41,10 +40,10 @@ type PgisIndexer struct {
 	Debug    bool
 	Verbose  bool
 	Strict   bool
-	clients  []tile38.Tile38Client
+	clients  []client.PgisClient
 }
 
-func NewPgisIndexer(clients ...tile38.PgisClient) (*PgisIndexer, error) {
+func NewPgisIndexer(clients ...client.PgisClient) (*PgisIndexer, error) {
 
 	idx := PgisIndexer{
 		Geometry: "", // use the default geojson geometry

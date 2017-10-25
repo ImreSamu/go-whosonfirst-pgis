@@ -25,7 +25,7 @@ func main() {
 
 	flag.Parse()
 
-	client, err := pgis.NewPgisClient(*pgis_host, *pgis_port, *pgis_user, *pgis_pswd, *pgis_dbname, *pgis_maxconns)
+	cl, err := client.NewPgisClient(*pgis_host, *pgis_port, *pgis_user, *pgis_pswd, *pgis_dbname, *pgis_maxconns)
 
 	if err != nil {
 		log.Fatalf("failed to create PgisClient (%s:%d) because %v", *pgis_host, *pgis_port, err)
@@ -39,7 +39,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		row, err := client.GetById(id)
+		row, err := cl.GetById(id)
 
 		if err != nil {
 			log.Fatal(err)

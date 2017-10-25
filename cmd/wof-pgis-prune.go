@@ -32,16 +32,16 @@ func main() {
 
 	runtime.GOMAXPROCS(*procs)
 
-	client, err := pgis.NewPgisClient(*pgis_host, *pgis_port, *pgis_user, *pgis_pswd, *pgis_dbname, *pgis_maxconns)
+	cl, err := client.NewPgisClient(*pgis_host, *pgis_port, *pgis_user, *pgis_pswd, *pgis_dbname, *pgis_maxconns)
 
 	if err != nil {
 		log.Fatalf("failed to create PgisClient (%s:%d) because %v", *pgis_host, *pgis_port, err)
 	}
 
-	client.Verbose = *verbose
-	client.Debug = *debug
+	cl.Verbose = *verbose
+	cl.Debug = *debug
 
-	err = client.Prune(*data_root, *delete)
+	err = cl.Prune(*data_root, *delete)
 
 	if err != nil {
 		log.Fatal(err)

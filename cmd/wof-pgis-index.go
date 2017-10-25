@@ -9,7 +9,7 @@ import (
 	"github.com/whosonfirst/go-whosonfirst-log"
 	"github.com/whosonfirst/go-whosonfirst-pgis/client"
 	"github.com/whosonfirst/go-whosonfirst-pgis/flags"
-	"github.com/whosonfirst/go-whosonfirst-pgis/index"	
+	"github.com/whosonfirst/go-whosonfirst-pgis/index"
 	"github.com/whosonfirst/go-whosonfirst-timer"
 	"io"
 	"os"
@@ -28,15 +28,15 @@ func main() {
 	procs := flag.Int("procs", 200, "The number of concurrent processes to use importing data.")
 
 	/*
-	pgis_host := flag.String("pgis-host", "localhost", "The host of your PostgreSQL server.")
-	pgis_port := flag.Int("pgis-port", 5432, "The port of your PostgreSQL server.")
-	pgis_user := flag.String("pgis-user", "whosonfirst", "The name of your PostgreSQL user.")
-	pgis_pswd := flag.String("pgis-password", "", "The password of your PostgreSQL user.")
-	pgis_dbname := flag.String("pgis-database", "whosonfirst", "The name of your PostgreSQL database.")
-	pgis_table := flag.String("pgis-table", "whosonfirst", "The name of your PostgreSQL database table.")
-	pgis_maxconns := flag.Int("pgis-maxconns", 10, "The maximum number of connections to use with your PostgreSQL database.")
+		pgis_host := flag.String("pgis-host", "localhost", "The host of your PostgreSQL server.")
+		pgis_port := flag.Int("pgis-port", 5432, "The port of your PostgreSQL server.")
+		pgis_user := flag.String("pgis-user", "whosonfirst", "The name of your PostgreSQL user.")
+		pgis_pswd := flag.String("pgis-password", "", "The password of your PostgreSQL user.")
+		pgis_dbname := flag.String("pgis-database", "whosonfirst", "The name of your PostgreSQL database.")
+		pgis_table := flag.String("pgis-table", "whosonfirst", "The name of your PostgreSQL database table.")
+		pgis_maxconns := flag.Int("pgis-maxconns", 10, "The maximum number of connections to use with your PostgreSQL database.")
 	*/
-	
+
 	verbose := flag.Bool("verbose", false, "Be chatty about what's happening. This is automatically enabled if the -debug flag is set.")
 	debug := flag.Bool("debug", false, "Go through all the motions but don't actually index anything.")
 
