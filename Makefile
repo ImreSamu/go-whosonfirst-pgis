@@ -11,6 +11,7 @@ self:   prep
 	mkdir -p src/github.com/whosonfirst/go-whosonfirst-pgis
 	cp -r client src/github.com/whosonfirst/go-whosonfirst-pgis/client
 	cp -r flags src/github.com/whosonfirst/go-whosonfirst-pgis/flags
+	cp -r flags src/github.com/whosonfirst/go-whosonfirst-pgis/index
 	cp -r vendor/* src/
 
 rmdeps:
@@ -35,6 +36,8 @@ vendor-deps: rmdeps deps
 fmt:
 	go fmt cmd/*.go
 	go fmt client/*.go
+	go fmt flags/*.go
+	go fmt index/*.go
 
 bin:	self
 	@GOPATH=$(GOPATH) go build -o bin/wof-pgis-connect cmd/wof-pgis-connect.go

@@ -8,6 +8,8 @@ import (
 	"github.com/whosonfirst/go-whosonfirst-index/utils"
 	"github.com/whosonfirst/go-whosonfirst-log"
 	"github.com/whosonfirst/go-whosonfirst-pgis/client"
+	"github.com/whosonfirst/go-whosonfirst-pgis/flags"
+	"github.com/whosonfirst/go-whosonfirst-pgis/index"	
 	"github.com/whosonfirst/go-whosonfirst-timer"
 	"io"
 	"os"
@@ -16,11 +18,16 @@ import (
 
 func main() {
 
+	var endpoints flags.Endpoints
+
+	flag.Var(&endpoints, "pgis-dsn", "One or more PostgreSQL DSNs to connect to.")
+
 	mode := flag.String("mode", "files", "The mode to use importing data. Valid options are: directory, meta, repo, filelist and files.")
 	geom := flag.String("geometry", "", "Which geometry to index. Valid options are: centroid, bbox or whatever is in the default GeoJSON geometry (default).")
 
 	procs := flag.Int("procs", 200, "The number of concurrent processes to use importing data.")
 
+	/*
 	pgis_host := flag.String("pgis-host", "localhost", "The host of your PostgreSQL server.")
 	pgis_port := flag.Int("pgis-port", 5432, "The port of your PostgreSQL server.")
 	pgis_user := flag.String("pgis-user", "whosonfirst", "The name of your PostgreSQL user.")
@@ -28,7 +35,8 @@ func main() {
 	pgis_dbname := flag.String("pgis-database", "whosonfirst", "The name of your PostgreSQL database.")
 	pgis_table := flag.String("pgis-table", "whosonfirst", "The name of your PostgreSQL database table.")
 	pgis_maxconns := flag.Int("pgis-maxconns", 10, "The maximum number of connections to use with your PostgreSQL database.")
-
+	*/
+	
 	verbose := flag.Bool("verbose", false, "Be chatty about what's happening. This is automatically enabled if the -debug flag is set.")
 	debug := flag.Bool("debug", false, "Go through all the motions but don't actually index anything.")
 
@@ -42,15 +50,22 @@ func main() {
 
 	logger := log.SimpleWOFLogger()
 
-	client, err := pgis.NewPgisClient(*pgis_host, *pgis_port, *pgis_user, *pgis_pswd, *pgis_dbname, *pgis_maxconns)
+	clients, err := endpoints.ToClients()
 
 	if err != nil {
-		logger.Fatal("failed to create PgisClient (%s:%d) because %v", *pgis_host, *pgis_port, err)
+		logger.Fatal("failed to convert endpoints to clients because %v", err)
 	}
 
-	client.Verbose = *verbose
-	client.Debug = *debug
-	client.Geometry = *geom
+	if len(clients) == 0 {
+
+	}
+
+	for _, cl := range clients {
+
+		cl.Verbose = *verbose
+		cl.Debug = *debug
+		cl.Geometry = *geom
+	}
 
 	cb := func(fh io.Reader, ctx context.Context, args ...interface{}) error {
 

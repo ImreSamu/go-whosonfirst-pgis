@@ -1,4 +1,4 @@
-package pgis
+package client
 
 import (
 	"database/sql"
@@ -157,6 +157,11 @@ func NewPgisClient(host string, port int, user string, password string, dbname s
 	} else {
 		dsn = fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", host, port, user, password, dbname)
 	}
+
+	return NewPgisClientWithDSN(dsn, maxconns)
+}
+
+func NewPgisClientWithDSN(dsn string, maxconns int) (*PgisClient, error) {
 
 	db, err := sql.Open("postgres", dsn)
 
